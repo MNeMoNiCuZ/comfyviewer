@@ -1781,7 +1781,7 @@ function save() {
   const blob = new Blob([JSON.stringify(raw, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = fileName.replace(/\.json$/i, '') + '.json';
+  a.download = fileName.replace(/\.(json|png|jpe?g|webp)$/i, '') + '.json';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   toast('Saved ' + a.download);
@@ -1789,17 +1789,165 @@ function save() {
 
 /* -------------------------------------------------------------- file loading */
 
-function readFile(file) {
-  const reader = new FileReader();
-  reader.onload = () => {
+/* ComfyUI embeds the graph in the images it saves, so those load like a .json:
+ * PNG keeps it in a "workflow" text chunk, JPEG and WebP in EXIF. */
+
+const utf8 = new TextDecoder();
+const latin1 = new TextDecoder('latin1');
+
+function pngChunks(d) {
+  const out = [];
+  const dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
+  let p = 8;
+  while (p + 8 <= d.length) {
+    const len = dv.getUint32(p);
+    const type = latin1.decode(d.subarray(p + 4, p + 8));
+    if (type === 'IEND') break;
+    if (type === 'tEXt' || type === 'zTXt' || type === 'iTXt')
+      out.push([type, d.subarray(p + 8, p + 8 + len)]);
+    p += len + 12;
+  }
+  return out;
+}
+
+async function inflate(bytes) {
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
+  return utf8.decode(await new Response(stream).arrayBuffer());
+}
+
+async function pngText(d) {
+  const out = {};
+  for (const [type, body] of pngChunks(d)) {
+    const z = body.indexOf(0);
+    if (z < 0) continue;
+    const key = latin1.decode(body.subarray(0, z));
     try {
-      loadWorkflow(JSON.parse(reader.result), file.name);
+      if (type === 'tEXt') {
+        out[key] = latin1.decode(body.subarray(z + 1));
+      } else if (type === 'zTXt') {
+        out[key] = await inflate(body.subarray(z + 2));
+      } else {
+        const compressed = body[z + 1];
+        let q = body.indexOf(0, z + 3) + 1;   // past the language tag
+        q = body.indexOf(0, q) + 1;           // past the translated keyword
+        const rest = body.subarray(q);
+        out[key] = compressed ? await inflate(rest) : utf8.decode(rest);
+      }
     } catch (err) {
-      toast(err.message || String(err), true);
+      /* one unreadable chunk should not sink the whole file */
+    }
+  }
+  return out;
+}
+
+const EXIF_SIZES = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8, 11: 4, 12: 8 };
+const EXIF_TEXT_TAGS = new Set([0x010e, 0x010f, 0x9286]);   // description, make, user comment
+
+function exifValue(b, tag) {
+  if (tag === 0x9286 && b.length > 8) {
+    const code = latin1.decode(b.subarray(0, 8));
+    const body = b.subarray(8);
+    if (code.startsWith('UNICODE'))
+      return new TextDecoder(body[0] === 0 ? 'utf-16be' : 'utf-16le').decode(body);
+    b = body;
+  }
+  return utf8.decode(b).replace(/\0+$/, '');
+}
+
+function exifStrings(d) {
+  const out = [];
+  if (!d || d.length < 8) return out;
+  const le = d[0] === 0x49;
+  const dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
+  const readIfd = (off, depth) => {
+    if (off <= 0 || off + 2 > d.length || depth > 2) return;
+    const n = dv.getUint16(off, le);
+    for (let i = 0; i < n; i++) {
+      const e = off + 2 + i * 12;
+      if (e + 12 > d.length) return;
+      const tag = dv.getUint16(e, le);
+      if (tag === 0x8769) { readIfd(dv.getUint32(e + 8, le), depth + 1); continue; }
+      if (!EXIF_TEXT_TAGS.has(tag)) continue;
+      const bytes = dv.getUint32(e + 4, le) * (EXIF_SIZES[dv.getUint16(e + 2, le)] || 1);
+      const at = bytes > 4 ? dv.getUint32(e + 8, le) : e + 8;
+      if (at + bytes <= d.length) out.push(exifValue(d.subarray(at, at + bytes), tag));
     }
   };
-  reader.onerror = () => toast('Could not read file', true);
-  reader.readAsText(file);
+  readIfd(dv.getUint32(4, le), 0);
+  return out;
+}
+
+function jpegExif(d) {
+  let p = 2;
+  while (p + 4 <= d.length && d[p] === 0xff) {
+    const marker = d[p + 1];
+    if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd9)) { p += 2; continue; }
+    if (marker === 0xda) break;                       // start of scan: no metadata past here
+    const len = (d[p + 2] << 8) | d[p + 3];
+    if (marker === 0xe1 && latin1.decode(d.subarray(p + 4, p + 10)) === 'Exif\0\0')
+      return d.subarray(p + 10, p + 2 + len);
+    p += 2 + len;
+  }
+  return null;
+}
+
+function webpExif(d) {
+  const dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
+  let p = 12;
+  while (p + 8 <= d.length) {
+    const id = latin1.decode(d.subarray(p, p + 4));
+    const len = dv.getUint32(p + 4, true);
+    if (id === 'EXIF') {
+      const b = d.subarray(p + 8, p + 8 + len);
+      return latin1.decode(b.subarray(0, 6)) === 'Exif\0\0' ? b.subarray(6) : b;
+    }
+    p += 8 + len + (len & 1);                          // chunks are padded to even lengths
+  }
+  return null;
+}
+
+// The EXIF strings are written as "Workflow:{...}", so take the JSON out of the middle.
+function jsonFrom(text) {
+  if (!text) return null;
+  const a = text.indexOf('{'), b = text.lastIndexOf('}');
+  if (a < 0 || b < a) return null;
+  try { return JSON.parse(text.slice(a, b + 1)); } catch (err) { return null; }
+}
+
+function isPng(d) { return d[0] === 0x89 && d[1] === 0x50 && d[2] === 0x4e && d[3] === 0x47; }
+function isJpeg(d) { return d[0] === 0xff && d[1] === 0xd8; }
+function isWebp(d) {
+  return latin1.decode(d.subarray(0, 4)) === 'RIFF' && latin1.decode(d.subarray(8, 12)) === 'WEBP';
+}
+
+async function parseWorkflowFile(buf, name) {
+  const d = new Uint8Array(buf);
+  let texts = null;
+
+  if (isPng(d)) {
+    const t = await pngText(d);
+    texts = [t.workflow, t.Workflow, t.prompt, t.Prompt, t.parameters];
+  } else if (isJpeg(d)) {
+    texts = exifStrings(jpegExif(d));
+  } else if (isWebp(d)) {
+    texts = exifStrings(webpExif(d));
+  }
+
+  if (texts) {
+    const graphs = texts.map(jsonFrom).filter(Boolean);
+    const workflow = graphs.find(g => Array.isArray(g.nodes));
+    // With no UI graph, hand the first find to loadWorkflow so it explains the API format.
+    if (workflow || graphs.length) return workflow || graphs[0];
+    throw new Error('No ComfyUI workflow is embedded in ' + name + '.');
+  }
+  return JSON.parse(utf8.decode(buf));
+}
+
+function readFile(file) {
+  file.arrayBuffer()
+    .then(buf => parseWorkflowFile(buf, file.name))
+    .then(data => loadWorkflow(data, file.name))
+    .catch(err => toast(err.message || String(err), true));
 }
 
 const overlay = document.getElementById('overlay');
@@ -1941,8 +2089,10 @@ renderReport();
 // ?workflow=<url> loads a file directly, handy for linking to a graph.
 const qs = new URLSearchParams(location.search).get('workflow');
 if (qs) {
-  fetch(qs).then(r => r.json())
-    .then(d => loadWorkflow(d, qs.split('/').pop()))
+  const qsName = qs.split('/').pop().split('?')[0];
+  fetch(qs).then(r => r.arrayBuffer())
+    .then(b => parseWorkflowFile(b, qsName))
+    .then(d => loadWorkflow(d, qsName))
     .catch(err => toast('Could not load ' + qs + ': ' + err.message, true));
 }
 

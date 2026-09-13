@@ -113,13 +113,13 @@
 <div id="drop">
   <div class="box">
     <div class="title">Drop a ComfyUI workflow</div>
-    <div class="sub">Drag a <code>.json</code> workflow file anywhere on this page</div>
+    <div class="sub">Drag a <code>.json</code> workflow, or a <code>.png</code>, <code>.jpg</code> or <code>.webp</code> containing a workflow</div>
     <button id="btn-open2">or browse…</button>
   </div>
 </div>
 
 <div id="overlay"></div>
-<input type="file" id="file" accept=".json,application/json" hidden>
+<input type="file" id="file" accept=".json,.png,.jpg,.jpeg,.webp,application/json,image/png,image/jpeg,image/webp" hidden>
 <script src="nodedb.js"></script>
 <script src="comfyview.js"></script>
 </body>
