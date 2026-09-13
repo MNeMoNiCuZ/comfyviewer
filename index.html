@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ComfyView: ComfyUI workflow viewer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="graph"></canvas>
+
+<div id="toolbar">
+  <span class="brand">ComfyView</span>
+  <button id="btn-open">Open…</button>
+  <button id="btn-save">Save JSON</button>
+  <button id="btn-fit">Fit</button>
+  <button id="btn-reset">Reset zoom</button>
+  <button id="btn-arrange">Arrange</button>
+  <button id="btn-report">Node packs</button>
+  <button id="btn-controls">Controls</button>
+  <span class="sep"></span>
+  <span id="info">no workflow loaded</span>
+</div>
+
+<div id="arrange" class="panel hidden">
+  <div class="head">
+    <span class="t">Arrange selection</span>
+    <button id="btn-arrange-close" class="icon" title="Close">✕</button>
+  </div>
+  <div class="arrange-body">
+    <div class="grp">
+      <div class="lbl">Align <span class="sub">: move onto a shared edge or centre line</span></div>
+      <div class="btns">
+        <button data-act="left" title="Put every left edge on the leftmost one">Left</button>
+        <button data-act="centerx" title="Centre them all on one vertical line">Center</button>
+        <button data-act="right" title="Put every right edge on the rightmost one">Right</button>
+        <button data-act="top" title="Put every top edge on the highest one">Top</button>
+        <button data-act="middley" title="Centre them all on one horizontal line">Middle</button>
+        <button data-act="bottom" title="Put every bottom edge on the lowest one">Bottom</button>
+      </div>
+    </div>
+    <div class="grp">
+      <div class="lbl">Match size <span class="sub">: resize to the topmost selected node</span></div>
+      <div class="btns">
+        <button data-act="matchw" title="Give every selected node the width of the topmost one">Width</button>
+        <button data-act="matchh" title="Give every selected node the height of the topmost one">Height</button>
+      </div>
+    </div>
+    <div class="grp">
+      <div class="lbl">Distribute</div>
+      <div class="btns">
+        <button data-act="stackv" title="Align left edges and restack top to bottom with the spacing below">Column ↓</button>
+        <button data-act="stackh" title="Align top edges and restack left to right with the spacing below">Row →</button>
+      </div>
+    </div>
+    <label class="gap-row">
+      Distribute spacing
+      <input type="number" id="gap" value="50" min="0" max="400" step="5">
+      px
+    </label>
+  </div>
+</div>
+
+<div id="controls" class="panel hidden">
+  <div class="head">
+    <span class="t">Controls</span>
+    <button id="btn-controls-close" class="icon" title="Close">✕</button>
+  </div>
+  <div class="controls-body">
+    <dl>
+      <dt>Left-drag empty canvas</dt><dd>marquee select</dd>
+      <dt>Right / middle drag</dt><dd>pan the view</dd>
+      <dt>Wheel</dt><dd>zoom</dd>
+      <dt>Right-click</dt><dd>context menu for a node, a comment box, or the canvas</dd>
+      <dt>Shift-click · Ctrl-click</dt><dd>add or remove one node</dd>
+      <dt>Alt-click · Alt-drag</dt><dd>remove from the selection, keeping the rest</dd>
+      <dt>Ctrl-drag</dt><dd>invert whatever the band covers</dd>
+      <dt>Ctrl+A · Esc</dt><dd>select all · clear selection</dd>
+      <dt>Drag a node</dt><dd>moves the whole selection</dd>
+      <dt>Node edge or corner</dt><dd>resize</dd>
+      <dt>Title dot</dt><dd>collapse or expand the node</dd>
+      <dt>Double-click a title</dt><dd>rename the node or comment box</dd>
+      <dt>C</dt><dd>wrap the selection in a comment box</dd>
+      <dt>Drag a box title</dt><dd>moves the box and its nodes</dd>
+      <dt>Shift-drag a box title</dt><dd>moves the box alone</dd>
+      <dt>Delete</dt><dd>remove the picked comment box</dd>
+      <dt>F · Ctrl+S</dt><dd>fit the view · save the JSON</dd>
+    </dl>
+  </div>
+</div>
+
+<div id="report" class="panel hidden">
+  <div class="head">
+    <span class="t">Node packs</span>
+    <button id="btn-report-close" class="icon" title="Close">✕</button>
+  </div>
+  <label class="row-toggle">
+    <input type="checkbox" id="chk-highlight">
+    Highlight packs on canvas
+  </label>
+  <label class="row-toggle">
+    <input type="checkbox" id="chk-labels">
+    Show pack name above each node
+  </label>
+  <div id="report-body"></div>
+  <div class="foot">
+    <button id="btn-copy">Copy list</button>
+  </div>
+</div>
+
+<div id="drop">
+  <div class="box">
+    <div class="title">Drop a ComfyUI workflow</div>
+    <div class="sub">Drag a <code>.json</code> workflow file anywhere on this page</div>
+    <button id="btn-open2">or browse…</button>
+  </div>
+</div>
+
+<div id="overlay"></div>
+<input type="file" id="file" accept=".json,application/json" hidden>
+<script src="nodedb.js"></script>
+<script src="comfyview.js"></script>
+</body>
+</html>
