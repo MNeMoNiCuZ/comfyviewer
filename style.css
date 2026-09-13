@@ -38,6 +38,19 @@ html, body {
   margin-right: 4px;
 }
 
+#toolbar #gh {
+  color: #ddd;
+  background: #2e2e2e;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 4px 9px;
+  text-decoration: none;
+}
+
+#toolbar #gh:hover {
+  background: #3a3a3a;
+}
+
 #toolbar .sep {
   width: 1px;
   height: 18px;
